@@ -793,7 +793,7 @@ def test_build_application_services_groups_dataset_services_and_reuses_repositor
         database_client=sqlite_session_factory,
         deployment_edition=DeploymentEdition.COMMUNITY,
         initialization_password="",
-        redis=MagicMock(spec=RedisClientWrapper),
+        redis=_redis(),
     )
 
     assert isinstance(services.data_sources.bindings, DataSourceBindingApplicationService)
@@ -837,7 +837,7 @@ def test_build_application_services_wires_credential_query(
         database_client=sqlite_session_factory,
         deployment_edition=DeploymentEdition.COMMUNITY,
         initialization_password="",
-        redis=MagicMock(spec=RedisClientWrapper),
+        redis=_redis(),
     )
     tenant_id, actor_id = str(uuid4()), str(uuid4())
     with sqlite_session_factory.begin() as session:
@@ -939,7 +939,7 @@ def test_build_application_services_reuses_installed_app_generation_dependencies
         database_client=sqlite_session_factory,
         deployment_edition=DeploymentEdition.COMMUNITY,
         initialization_password="",
-        redis=MagicMock(spec=RedisClientWrapper),
+        redis=_redis(),
     )
 
     assert services.installed_apps.access._installed_apps is services.installed_apps.generation._usage
