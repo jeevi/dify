@@ -1,4 +1,4 @@
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
@@ -55,8 +55,10 @@ def test_token_gateway_issues_verified_registration_state() -> None:
     )
 
 
-def test_security_gateway_delegates_ip_limit_to_existing_policy_owner() -> None:
-    redis = Mock(spec=RedisClientWrapper)
+def test_security_gateway_delegates_ip_limit_to_existing_policy_owner(
+    redis_transport: tuple[RedisClientWrapper, MagicMock],
+) -> None:
+    redis, commands = redis_transport
     gateway = RedisEmailRegistrationSecurityGateway(
         redis=redis,
         verification_failure_limit=5,
@@ -70,12 +72,14 @@ def test_security_gateway_delegates_ip_limit_to_existing_policy_owner() -> None:
         assert gateway.is_ip_limited("127.0.0.1") is False
 
     is_email_send_ip_limit.assert_called_once_with("127.0.0.1")
-    redis.get.assert_not_called()
+    commands.assert_not_called()
 
 
-def test_security_gateway_uses_registration_and_login_keys() -> None:
-    redis = Mock(spec=RedisClientWrapper)
-    redis.get.return_value = 1
+def test_security_gateway_uses_registration_and_login_keys(
+    redis_transport: tuple[RedisClientWrapper, MagicMock],
+) -> None:
+    redis, commands = redis_transport
+    commands.return_value = 1
     gateway = RedisEmailRegistrationSecurityGateway(
         redis=redis,
         verification_failure_limit=5,
@@ -89,9 +93,10 @@ def test_security_gateway_uses_registration_and_login_keys() -> None:
         gateway.reset_verification_failures("user@example.com")
         gateway.reset_login_failures("user@example.com")
 
-    redis.setex.assert_called_once_with("email_register_error_rate_limit:user@example.com", 600, 2)
-    redis.delete.assert_called_once_with("email_register_error_rate_limit:user@example.com")
+    commands.assert_any_call("SETEX", "email_register_error_rate_limit:user@example.com", 600, 2)
+    commands.assert_any_call("DEL", "email_register_error_rate_limit:user@example.com")
     reset_login_error_rate_limit.assert_called_once_with("user@example.com")
+    assert commands.call_count == 3
 
 
 def test_billing_policy_is_disabled_outside_cloud() -> None:
