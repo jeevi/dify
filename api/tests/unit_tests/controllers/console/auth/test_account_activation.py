@@ -1,10 +1,12 @@
 """Transport-boundary tests for account invitation activation."""
 
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from flask import Flask
+from pytest_mock import MockerFixture
+from sqlalchemy.orm import Session, sessionmaker
 from werkzeug.exceptions import UnprocessableEntity
 
 from controllers.console.auth.activate import ActivateApi, ActivateCheckApi
@@ -16,6 +18,9 @@ from controllers.console.error import (
 from controllers.console.error import (
     EmailDomainSuspendedError as EmailDomainSuspendedHTTPError,
 )
+from enums import DeploymentEdition
+from extensions.ext_application_services import build_application_services
+from extensions.ext_redis import RedisClientWrapper
 from services.account_activation_service import (
     AccountActivationService,
     FrozenAccountError,
@@ -41,11 +46,23 @@ def app() -> Flask:
 
 
 @pytest.fixture
-def activation_service() -> Mock:
-    return Mock(spec=AccountActivationService)
+def activation_service(
+    sqlite_session_factory: sessionmaker[Session],
+    redis_transport: tuple[RedisClientWrapper, MagicMock],
+    mocker: MockerFixture,
+) -> AccountActivationService:
+    service = build_application_services(
+        database_client=sqlite_session_factory,
+        deployment_edition=DeploymentEdition.COMMUNITY,
+        initialization_password="",
+        redis=redis_transport[0],
+    ).account_activation
+    mocker.patch.object(service, "check")
+    mocker.patch.object(service, "activate")
+    return service
 
 
-def _services(service: Mock) -> SimpleNamespace:
+def _services(service: AccountActivationService) -> SimpleNamespace:
     return SimpleNamespace(account_activation=service)
 
 
@@ -53,7 +70,7 @@ class TestActivateCheckApi:
     def test_serializes_valid_invitation(
         self,
         app: Flask,
-        activation_service: Mock,
+        activation_service: AccountActivationService,
     ) -> None:
         activation_service.check.return_value = ActivationCheckResult(
             is_valid=True,
@@ -94,7 +111,7 @@ class TestActivateCheckApi:
             ),
         )
 
-    def test_omits_data_for_invalid_invitation(self, app: Flask, activation_service: Mock) -> None:
+    def test_omits_data_for_invalid_invitation(self, app: Flask, activation_service: AccountActivationService) -> None:
         activation_service.check.return_value = ActivationCheckResult(is_valid=False)
 
         with (
@@ -108,7 +125,7 @@ class TestActivateCheckApi:
 
         assert response == {"is_valid": False}
 
-    def test_rejects_request_without_token(self, app: Flask, activation_service: Mock) -> None:
+    def test_rejects_request_without_token(self, app: Flask, activation_service: AccountActivationService) -> None:
         """`token` is required, so a tokenless query must not reach the application service."""
         with (
             app.test_request_context("/activate/check?workspace_id=workspace-123"),
@@ -127,7 +144,7 @@ class TestActivateApi:
     def test_passes_parsed_command_to_application_service(
         self,
         app: Flask,
-        activation_service: Mock,
+        activation_service: AccountActivationService,
     ) -> None:
         payload = {
             "workspace_id": "workspace-123",
@@ -169,7 +186,7 @@ class TestActivateApi:
     def test_passes_no_authenticated_account_for_token_only_activation(
         self,
         app: Flask,
-        activation_service: Mock,
+        activation_service: AccountActivationService,
     ) -> None:
         with (
             app.test_request_context("/activate", method="POST", json={"token": "valid-token"}),
@@ -201,7 +218,7 @@ class TestActivateApi:
     def test_translates_application_errors(
         self,
         app: Flask,
-        activation_service: Mock,
+        activation_service: AccountActivationService,
         service_error: Exception,
         http_error: type[Exception],
     ) -> None:
@@ -218,7 +235,7 @@ class TestActivateApi:
         ):
             ActivateApi().post()
 
-    def test_rejects_request_without_token(self, app: Flask, activation_service: Mock) -> None:
+    def test_rejects_request_without_token(self, app: Flask, activation_service: AccountActivationService) -> None:
         """`token` is required, so a tokenless payload must not resolve the session or reach the service."""
         with (
             app.test_request_context("/activate", method="POST", json={"workspace_id": "workspace-123"}),
